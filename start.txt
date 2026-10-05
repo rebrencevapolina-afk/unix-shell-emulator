@@ -1,7 +1,7 @@
-# Это комментарий
+# Стартовый скрипт для тестирования Этапа 3
+# Проверяем работу с VFS и обработку ошибок
 ls
-cd /home/user
+cd /home
 ls -l $HOME
 unknown_command
-ls
 exit
