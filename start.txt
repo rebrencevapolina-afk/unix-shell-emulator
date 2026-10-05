@@ -1,0 +1,7 @@
+# Это комментарий
+ls
+cd /home/user
+ls -l $HOME
+unknown_command
+ls
+exit
