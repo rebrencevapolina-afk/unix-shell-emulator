@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <config>
-    <vfs_path>./vfs_multi.zip</vfs_path>
-    <script_path>./start.txt</script_path>
+    <vfs_path>./vfs_nested.zip</vfs_path>
+    <script_path>./start_stage4.txt</script_path>
 </config>

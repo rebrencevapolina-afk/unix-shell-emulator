@@ -28,6 +28,13 @@
 - Тестовые архивы: минимальный, с несколькими файлами, с 3 уровнями вложенности.
 - BAT-скрипты для запуска всех вариантов VFS.
 
+**Этап 4:**
+- Работающая команда `ls` — показывает содержимое текущей папки.
+- Работающая команда `cd` — переход по папкам (поддержка `..`, `/`, относительных и абсолютных путей).
+- Команда `cat` — вывод содержимого текстовых файлов, сообщения о бинарных и о папках.
+- Команда `whoami` — вывод имени текущего пользователя.
+- Приглашение к вводу показывает текущий путь (например, `VFS:/docs/>`).
+
 ## Требования
 
 - Python 3.10+
@@ -87,8 +94,21 @@
     > python main.py --vfs ./my_vfs
     VFS путь: ./my_vfs
 
-## Структура проекта
+Пример 5. Работа с VFS (Этап 4):
 
+    VFS:/> ls
+    docs  readme.txt  src
+    VFS:/> cd docs
+    VFS:/docs/> ls
+    api  guide.md
+    VFS:/docs/> cat guide.md
+    # Guide
+    Some documentation.
+    VFS:/docs/> cd ..
+    VFS:/> whoami
+    user
+
+## Структура проекта
 
     unix-shell-emulator/
     ├── main.py
@@ -96,6 +116,7 @@
     ├── config.xml
     ├── bad_config.xml
     ├── start.txt
+    ├── start_stage4.txt
     ├── vfs_minimal.zip
     ├── vfs_multi.zip
     ├── vfs_nested.zip
@@ -105,4 +126,4 @@
     ├── run_vfs_multi.bat
     ├── run_vfs_nested.bat
     ├── run_vfs_error.bat
-    └── readme.md   
+    └── readme.md  

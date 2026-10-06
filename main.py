@@ -3,6 +3,8 @@ import sys
 import argparse
 import xml.etree.ElementTree as ET
 import zipfile
+import base64
+import getpass
 
 
 def load_vfs(vfs_path):
@@ -24,7 +26,12 @@ def load_vfs(vfs_path):
             for name in zf.namelist():
                 if name.endswith('/'):
                     continue
-                content = zf.read(name).decode('utf-8')
+                raw = zf.read(name)
+                try:
+                    content = raw.decode('utf-8')
+                except UnicodeDecodeError:
+                    content = {'__binary__': base64.b64encode(raw).decode('ascii')}
+
                 parts = name.split('/')
                 current = vfs
                 for part in parts[:-1]:
@@ -41,6 +48,71 @@ def load_vfs(vfs_path):
 
 
 
+class VFSState:
+    def __init__(self, vfs):
+        self.root = vfs if vfs is not None else {}
+        self.path = []  
+
+    def current(self):
+        node = self.root
+        for name in self.path:
+            if isinstance(node, dict) and name in node:
+                node = node[name]
+            else:
+                return {}
+        return node
+
+    def resolve(self, target):
+        if not target:
+            return list(self.path)
+
+        if target.startswith('/'):
+            parts = target.strip('/').split('/')
+        else:
+            parts = self.path + target.split('/')
+
+        result = []
+        for part in parts:
+            if part == '' or part == '.':
+                continue
+            if part == '..':
+                if result:
+                    result.pop()
+            else:
+                result.append(part)
+        return result
+
+    def get_node(self, path_parts):
+        node = self.root
+        for name in path_parts:
+            if isinstance(node, dict) and name in node:
+                node = node[name]
+            else:
+                return None
+        return node
+
+    def cd(self, target):
+        if not target:
+            self.path = []
+            return True
+
+        new_path = self.resolve(target)
+        node = self.get_node(new_path)
+        if node is None:
+            return False
+        if not isinstance(node, dict):
+            return False 
+        self.path = new_path
+        return True
+
+    def pwd(self):
+        """Возвращает текущий путь в виде строки."""
+        if not self.path:
+            return '/'
+        return '/' + '/'.join(self.path) + '/'
+
+
+
 def parse_and_expand(command_line):
     parts = command_line.split()
     if not parts:
@@ -49,17 +121,69 @@ def parse_and_expand(command_line):
     return expanded_parts[0], expanded_parts[1:]
 
 
-def act(command, args):
+def cmd_ls(state, args):
+    node = state.current()
+    if not isinstance(node, dict):
+        return "ls: не папка"
+    if not node:
+        return "(пусто)"
+    return '  '.join(sorted(node.keys()))
+
+
+def cmd_cd(state, args):
+    if len(args) > 1:
+        return "cd: слишком много аргументов"
+    target = args[0] if args else None
+    if state.cd(target):
+        return None  
+    return f"cd: '{target}': нет такой папки"
+
+
+def cmd_cat(state, args):
+    if not args:
+        return "cat: не указан файл"
+    results = []
+    for arg in args:
+        path_parts = state.resolve(arg)
+        node = state.get_node(path_parts)
+        if node is None:
+            results.append(f"cat: '{arg}': файл не найден")
+        elif isinstance(node, dict):
+            if '__binary__' in node:
+                results.append(f"cat: '{arg}': бинарный файл (base64, {len(node['__binary__'])} символов)")
+            else:
+                results.append(f"cat: '{arg}': это папка")
+        else:
+            results.append(node)
+    return '\n'.join(results)
+
+
+def cmd_whoami(state, args):
+    if args:
+        return "whoami: аргументы не поддерживаются"
+    try:
+        return getpass.getuser()
+    except Exception:
+        return "unknown"
+
+
+def act(command, args, state):
     if command == "exit":
         return None
-    elif command == "ls" or command == "cd":
-        return f"{command} {' '.join(args)}"
+    elif command == "ls":
+        return cmd_ls(state, args)
+    elif command == "cd":
+        return cmd_cd(state, args)
+    elif command == "cat":
+        return cmd_cat(state, args)
+    elif command == "whoami":
+        return cmd_whoami(state, args)
     else:
         return f"{command}: command not found"
 
 
 
-def run_script(script_path):
+def run_script(script_path, state):
     if not os.path.isfile(script_path):
         print(f"Ошибка: стартовый скрипт '{script_path}' не найден.")
         return
@@ -82,10 +206,13 @@ def run_script(script_path):
         if command is None:
             continue
         try:
-            result = act(command, args)
+            result = act(command, args, state)
             if result is None:
-                print("Выход из эмулятора.")
-                return
+                if command == "exit":
+                    print("Выход из эмулятора.")
+                    return
+
+                continue
             print(result)
         except Exception as e:
             print(f"Ошибка выполнения команды '{command}': {e}")
@@ -118,18 +245,21 @@ def parse_config(config_path):
     return config
 
 
-def repl(vfs):
-    prompt = "VFS> "
+
+def repl(state):
     while True:
         try:
+            prompt = f"VFS:{state.pwd()}> "
             user_input = input(prompt)
             command, args = parse_and_expand(user_input)
             if command is None:
                 continue
-            result = act(command, args)
+            result = act(command, args, state)
             if result is None:
-                print("Выход из эмулятора.")
-                break
+                if command == "exit":
+                    print("Выход из эмулятора.")
+                    break
+                continue  # cd без вывода
             print(result)
         except EOFError:
             print("\nВыход из эмулятора.")
@@ -156,17 +286,17 @@ def main():
     vfs_path = args.vfs if args.vfs else config.get('vfs_path')
     script_path = args.script if args.script else config.get('script_path')
 
-    print("=== Итоговые параметры ===")
+    print("    Итоговые параметры ")
     print(f"VFS путь: {vfs_path}")
     print(f"Стартовый скрипт: {script_path}")
 
     vfs = load_vfs(vfs_path)
+    state = VFSState(vfs)
 
     if script_path:
-        run_script(script_path)
+        run_script(script_path, state)
 
-    # Запускаем REPL
-    repl(vfs)
+    repl(state)
 
 
 if __name__ == "__main__":
