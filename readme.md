@@ -35,6 +35,11 @@
 - Команда `whoami` — вывод имени текущего пользователя.
 - Приглашение к вводу показывает текущий путь (например, `VFS:/docs/>`).
 
+**Этап 5:**
+- Команда `chown` — смена владельца файла или папки.
+- Расширенная структура VFS: каждый файл и папка теперь хранят метаданные (`type`, `content`, `owner`, `group`).
+- Расширенный вывод `ls -l` — показывает тип узла и владельца.
+
 ## Требования
 
 - Python 3.10+
@@ -108,6 +113,19 @@
     VFS:/> whoami
     user
 
+Пример 6. Работа команды `chown` (Этап 5):
+
+    VFS:/> ls -l
+    d user       docs
+    - user       readme.txt
+    d user       src
+    VFS:/> chown admin readme.txt
+    Владелец 'readme.txt' изменён на 'admin'
+    VFS:/> ls -l
+    d user       docs
+    - admin      readme.txt
+    d user       src
+
 ## Структура проекта
 
     unix-shell-emulator/
@@ -117,6 +135,7 @@
     ├── bad_config.xml
     ├── start.txt
     ├── start_stage4.txt
+    ├── start_stage5.txt
     ├── vfs_minimal.zip
     ├── vfs_multi.zip
     ├── vfs_nested.zip
@@ -126,4 +145,4 @@
     ├── run_vfs_multi.bat
     ├── run_vfs_nested.bat
     ├── run_vfs_error.bat
-    └── readme.md  
+    └── readme.md

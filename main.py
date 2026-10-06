@@ -7,6 +7,19 @@ import base64
 import getpass
 
 
+
+def make_file(content, owner='user', group='user'):
+    if isinstance(content, dict) and '__binary__' in content:
+        return {'type': 'file', 'content': content, 'owner': owner, 'group': group}
+    return {'type': 'file', 'content': content, 'owner': owner, 'group': group}
+
+
+def make_dir(owner='user', group='user'):
+    """Создаёт объект-папку с метаданными"""
+    return {'type': 'dir', 'content': {}, 'owner': owner, 'group': group}
+
+
+
 def load_vfs(vfs_path):
     if not vfs_path:
         print("VFS не указана. Работаем без виртуальной файловой системы.")
@@ -20,7 +33,13 @@ def load_vfs(vfs_path):
         print(f"Ошибка загрузки VFS: файл '{vfs_path}' не является ZIP-архивом.")
         return None
 
-    vfs = {}
+    try:
+        default_owner = getpass.getuser()
+    except Exception:
+        default_owner = 'user'
+
+    root = make_dir(owner=default_owner)
+
     try:
         with zipfile.ZipFile(vfs_path, 'r') as zf:
             for name in zf.namelist():
@@ -33,36 +52,38 @@ def load_vfs(vfs_path):
                     content = {'__binary__': base64.b64encode(raw).decode('ascii')}
 
                 parts = name.split('/')
-                current = vfs
+                current = root
                 for part in parts[:-1]:
-                    if part not in current:
-                        current[part] = {}
-                    current = current[part]
-                current[parts[-1]] = content
+                    if part not in current['content']:
+                        current['content'][part] = make_dir(owner=default_owner)
+                    current = current['content'][part]
+                current['content'][parts[-1]] = make_file(content, owner=default_owner)
     except Exception as e:
         print(f"Ошибка загрузки VFS: {e}")
         return None
 
     print(f"VFS успешно загружена из '{vfs_path}'.")
-    return vfs
+    return root
 
 
 
 class VFSState:
-    def __init__(self, vfs):
-        self.root = vfs if vfs is not None else {}
+    def __init__(self, root):
+        self.root = root if root is not None else make_dir()
         self.path = []  
 
     def current(self):
+        """Возвращает текущую папку"""
         node = self.root
         for name in self.path:
-            if isinstance(node, dict) and name in node:
-                node = node[name]
+            if node.get('type') == 'dir' and name in node['content']:
+                node = node['content'][name]
             else:
-                return {}
+                return self.root
         return node
 
     def resolve(self, target):
+        """Преобразует путь в список компонентов"""
         if not target:
             return list(self.path)
 
@@ -83,15 +104,17 @@ class VFSState:
         return result
 
     def get_node(self, path_parts):
+        """Возвращает узел по списку компонентов пути"""
         node = self.root
         for name in path_parts:
-            if isinstance(node, dict) and name in node:
-                node = node[name]
+            if node.get('type') == 'dir' and name in node['content']:
+                node = node['content'][name]
             else:
                 return None
         return node
 
     def cd(self, target):
+        """Меняет текущую папку"""
         if not target:
             self.path = []
             return True
@@ -100,13 +123,12 @@ class VFSState:
         node = self.get_node(new_path)
         if node is None:
             return False
-        if not isinstance(node, dict):
-            return False 
+        if node.get('type') != 'dir':
+            return False
         self.path = new_path
         return True
 
     def pwd(self):
-        """Возвращает текущий путь в виде строки."""
         if not self.path:
             return '/'
         return '/' + '/'.join(self.path) + '/'
@@ -123,11 +145,11 @@ def parse_and_expand(command_line):
 
 def cmd_ls(state, args):
     node = state.current()
-    if not isinstance(node, dict):
+    if node.get('type') != 'dir':
         return "ls: не папка"
-    if not node:
+    if not node['content']:
         return "(пусто)"
-    return '  '.join(sorted(node.keys()))
+    return '  '.join(sorted(node['content'].keys()))
 
 
 def cmd_cd(state, args):
@@ -135,7 +157,7 @@ def cmd_cd(state, args):
         return "cd: слишком много аргументов"
     target = args[0] if args else None
     if state.cd(target):
-        return None  
+        return None
     return f"cd: '{target}': нет такой папки"
 
 
@@ -148,13 +170,14 @@ def cmd_cat(state, args):
         node = state.get_node(path_parts)
         if node is None:
             results.append(f"cat: '{arg}': файл не найден")
-        elif isinstance(node, dict):
-            if '__binary__' in node:
-                results.append(f"cat: '{arg}': бинарный файл (base64, {len(node['__binary__'])} символов)")
-            else:
-                results.append(f"cat: '{arg}': это папка")
+        elif node.get('type') == 'dir':
+            results.append(f"cat: '{arg}': это папка")
         else:
-            results.append(node)
+            content = node['content']
+            if isinstance(content, dict) and '__binary__' in content:
+                results.append(f"cat: '{arg}': бинарный файл (base64, {len(content['__binary__'])} символов)")
+            else:
+                results.append(content)
     return '\n'.join(results)
 
 
@@ -167,10 +190,48 @@ def cmd_whoami(state, args):
         return "unknown"
 
 
+def cmd_chown(state, args):
+    if len(args) < 2:
+        return "chown: использование: chown ВЛАДЕЛЕЦ ФАЙЛ [ФАЙЛ...]"
+
+    new_owner = args[0]
+    targets = args[1:]
+    results = []
+
+    for target in targets:
+        path_parts = state.resolve(target)
+        node = state.get_node(path_parts)
+        if node is None:
+            results.append(f"chown: '{target}': файл не найден")
+            continue
+        node['owner'] = new_owner
+        node['group'] = new_owner  
+        results.append(f"Владелец '{target}' изменён на '{new_owner}'")
+
+    return '\n'.join(results)
+
+
+def cmd_ls_l(state, args):
+    node = state.current()
+    if node.get('type') != 'dir':
+        return "ls: не папка"
+    if not node['content']:
+        return "(пусто)"
+    lines = []
+    for name in sorted(node['content'].keys()):
+        child = node['content'][name]
+        owner = child.get('owner', '?')
+        kind = 'd' if child.get('type') == 'dir' else '-'
+        lines.append(f"{kind} {owner:10s} {name}")
+    return '\n'.join(lines)
+
+
 def act(command, args, state):
     if command == "exit":
         return None
     elif command == "ls":
+        if args and args[0] == '-l':
+            return cmd_ls_l(state, args[1:])
         return cmd_ls(state, args)
     elif command == "cd":
         return cmd_cd(state, args)
@@ -178,6 +239,8 @@ def act(command, args, state):
         return cmd_cat(state, args)
     elif command == "whoami":
         return cmd_whoami(state, args)
+    elif command == "chown":
+        return cmd_chown(state, args)
     else:
         return f"{command}: command not found"
 
@@ -211,7 +274,6 @@ def run_script(script_path, state):
                 if command == "exit":
                     print("Выход из эмулятора.")
                     return
-
                 continue
             print(result)
         except Exception as e:
@@ -259,7 +321,7 @@ def repl(state):
                 if command == "exit":
                     print("Выход из эмулятора.")
                     break
-                continue  # cd без вывода
+                continue
             print(result)
         except EOFError:
             print("\nВыход из эмулятора.")
@@ -290,8 +352,8 @@ def main():
     print(f"VFS путь: {vfs_path}")
     print(f"Стартовый скрипт: {script_path}")
 
-    vfs = load_vfs(vfs_path)
-    state = VFSState(vfs)
+    root = load_vfs(vfs_path)
+    state = VFSState(root)
 
     if script_path:
         run_script(script_path, state)
